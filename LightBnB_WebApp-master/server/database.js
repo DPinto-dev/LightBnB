@@ -61,7 +61,7 @@ const addUser = function(user) {
       [user.name, user.email, user.password]
     )
     .then(result => result.rows[0] || null)
-    .catch(err => console.log(err.stack));
+    .catch(err => console.log("Error inside addUser:", err.stack));
 };
 exports.addUser = addUser;
 
@@ -87,7 +87,7 @@ const getAllReservations = (guest_id, limit = 10) => {
       [guest_id, limit]
     )
     .then(result => result.rows || null)
-    .catch(err => console.log(err));
+    .catch(err => console.log("Error inside getAllReservations:", err.stack));
 };
 exports.getAllReservations = getAllReservations;
 
@@ -99,18 +99,54 @@ exports.getAllReservations = getAllReservations;
  * @param {*} limit The number of results to return.
  * @return {Promise<[{}]>}  A promise to the properties.
  */
-// const getAllProperties = function(options, limit = 10) {
-//   const limitedProperties = {};
-//   for (let i = 1; i <= limit; i++) {
-//     limitedProperties[i] = properties[i];
-//   }
-//   return Promise.resolve(limitedProperties);
-// };
+const getAllProperties = (options, limit = 10) => {
+  const values = []; //queryParams
+  const {
+    city,
+    owner_id,
+    minimum_price_per_night,
+    maximum_price_per_night,
+    minimum_rating
+  } = options;
 
-const getAllProperties = function(options, limit = 10) {
+  let queryStr = `SELECT properties.*, AVG(property_reviews.rating) as average_rating
+  FROM properties
+  LEFT JOIN property_reviews ON properties.id = property_reviews.property_id `;
+
+  if (city) {
+    values.push(`%${city}%`);
+    queryStr += ` WHERE city LIKE $${values.length} `;
+  }
+  if (owner_id) {
+    // If one of the params have been set by the user append an 'AND' otherwise it'll be the first so append a 'WHERE'
+    queryStr += values.length ? `AND` : `WHERE`;
+    values.push(owner_id); //! Does it need to be a str? `${}`
+    queryStr += ` owner_id = $${values.length} `;
+  }
+  if (minimum_price_per_night && maximum_price_per_night) {
+    queryStr += values.length ? `AND` : `WHERE`;
+    values.push(minimum_price_per_night * 100);
+    values.push(maximum_price_per_night * 100);
+    queryStr += ` cost_per_night BETWEEN $${values.length - 1} AND $${
+      values.length
+    } `;
+  }
+
+  queryStr += ` GROUP BY properties.id `;
+
+  if (minimum_rating) {
+    values.push(minimum_rating);
+    queryStr += ` HAVING AVG(property_reviews.rating) >= $${values.length} `;
+  }
+
+  values.push(limit);
+  queryStr += ` ORDER BY cost_per_night LIMIT $${values.length} `;
+
+  console.log(queryStr, values);
   return pool
-    .query(`SELECT * FROM properties LIMIT $1`, [limit])
-    .then(res => res.rows);
+    .query(queryStr, values)
+    .then(res => res.rows)
+    .catch(err => console.log("Error inside getAllProperties:", err.stack));
 };
 
 exports.getAllProperties = getAllProperties;
@@ -121,9 +157,46 @@ exports.getAllProperties = getAllProperties;
  * @return {Promise<{}>} A promise to the property.
  */
 const addProperty = function(property) {
-  const propertyId = Object.keys(properties).length + 1;
-  property.id = propertyId;
-  properties[propertyId] = property;
-  return Promise.resolve(property);
+  const {
+    owner_id,
+    title,
+    description,
+    thumbnail_photo_url,
+    cover_photo_url,
+    cost_per_night,
+    parking_spaces,
+    number_of_bathrooms,
+    number_of_bedrooms,
+    country,
+    street,
+    city,
+    province,
+    post_code
+  } = property;
+
+  // For the query string I'm defaulting the properties.id and properties.active
+  return pool
+    .query(
+      `INSERT INTO properties
+    VALUES (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, default) RETURNING *;`,
+      [
+        owner_id,
+        title,
+        description,
+        thumbnail_photo_url,
+        cover_photo_url,
+        cost_per_night * 100,
+        parking_spaces,
+        number_of_bathrooms,
+        number_of_bedrooms,
+        country,
+        street,
+        city,
+        province,
+        post_code
+      ]
+    )
+    .then(result => result.rows[0] || null)
+    .catch(err => console.log("Error inside addProperty:", err.stack));
 };
 exports.addProperty = addProperty;
